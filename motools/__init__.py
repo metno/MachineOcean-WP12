@@ -5,6 +5,8 @@
 """
 
 import logging
+import os
+import time
 
 __package__    = "Machine Ocean Tools"
 __author__     = "MET Norway"
@@ -20,3 +22,7 @@ __credits__    = [
 
 # Initiating logging
 logger = logging.getLogger(__name__)
+
+# Make sure the interpreter is in UTC in all the following
+os.environ["TZ"] = "UTC"
+time.tzset()
