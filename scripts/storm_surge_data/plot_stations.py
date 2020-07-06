@@ -37,7 +37,7 @@ meridians = np.arange(-10., 40, 10.)
 basemap_obj.drawmeridians(meridians, labels=[True, False, False, True])
 
 # get the data from the example file
-folder = "../../example_data/storm_surge/"
+folder = "../../example_data/StormSurge/NorwegianStations/"
 path = folder + "kyststasjoner_norge.nc2019110700"
 
 nc_content = nc4.Dataset(path, 'r')
