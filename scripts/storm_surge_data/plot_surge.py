@@ -36,16 +36,17 @@ nc_water_model_error = nc_water_station - nc_water_model_mean
 fig, ax = plt.subplots()
 
 show_ensemble_simulations = False
+
 if show_ensemble_simulations:
     for ensemble_nbr in range(nbr_ensemble-1):
-        plt.plot(nc_datetime, nc_water_model[:, ensemble_nbr, 0, 0] - nc_water_tide[:,  0, 0],
-                color='k', linewidth=0.5)
-        plt.plot(nc_datetime, nc_water_model[:, ensemble_nbr, 0, 0] - nc_water_tide[:,  0, 0],
+        plt.plot(nc_datetime, nc_water_model[:, ensemble_nbr, 0, 0] - nc_water_tide[:, 0, 0],
+                 color='k', linewidth=0.5)
+        plt.plot(nc_datetime, nc_water_model[:, ensemble_nbr, 0, 0] - nc_water_tide[:, 0, 0],
                  color='k', linewidth=0.5,
                  label=datafield_model)
 
 plt.plot(nc_datetime, nc_water_model_mean_notide[:, 0, 0],
-         label="prediction - tide, mean, 3 std".format(datafield_model),
+         label="prediction - tide, mean, 3 std",
          linewidth=2.5, color="blue")
 
 ax.fill_between(nc_datetime,
@@ -54,7 +55,7 @@ ax.fill_between(nc_datetime,
                 alpha=0.2,
                 color="blue")
 
-plt.plot(nc_datetime, nc_water_station_notide[:,  0, 0],
+plt.plot(nc_datetime, nc_water_station_notide[:, 0, 0],
          label="{} - tide".format(datafield_stations), color='r',
          linewidth=2.5)
 
@@ -64,21 +65,9 @@ fig, ax = plt.subplots()
 
 for station in range(nbr_stations):
     plt.plot(nc_datetime, nc_water_model_error[:, 0, station],
-            label="{}".format(station))
+             label="{}".format(station))
 
 plt.legend()
 plt.ylabel("model error")
 
 plt.show()
-
-"""
-- start by thinking in terms of mean
-- note that this may also need some distribution approaches
-- direct ML approach
-- use ML to predict some forms of correlation etc
-- problem: how to get ML to become good on 'extreme' events?
-- get data from the other stations (UK, France, Sweden, Danmark, etc...) as predictors
-- get data from AROME as predictors
-- get data from Feroe islands
-- get data from Northen Isles over UK
-"""
