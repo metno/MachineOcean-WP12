@@ -9,7 +9,7 @@ import netCDF4 as nc4
 fig, ax = plt.subplots()
 
 # setup Lambert Conformal basemap.
-basemap_obj = Basemap(llcrnrlon=-8.0, llcrnrlat=55.5, urcrnrlon=34.5, urcrnrlat=72.0,
+basemap_obj = Basemap(llcrnrlon=-5.5, llcrnrlat=52.5, urcrnrlon=34.5, urcrnrlat=72.0,
                       lat_0="65.0", lon_0=15.0,
                       projection="lcc",
                       resolution="l"  # c (crude), l (low), i (intermediate), h (high), f (full)
