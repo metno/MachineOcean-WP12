@@ -42,8 +42,8 @@ def index_ranges_within_bounds(x_coords, y_coords, x_bounds, y_bounds, comp_epsi
         comp_epsilon: tolerance for performing floating comparisons
 
     Output:
-        (lower_x_index, upper_x_index, lower_y_index, upper_y_index):
-            the lower and upper bounds for ranges on the x and y indexes so that all data
+        (lower_0_index, upper_0_index, lower_1_index, upper_1_index):
+            the lower and upper bounds for ranges on the 0 and 1 axis indexes so that all data
             that have coordinates within the prescribed x and y bounds are captured.
 
             Note: these are Python bounds, to be used with the convention [lower:upper[,
@@ -71,11 +71,11 @@ def index_ranges_within_bounds(x_coords, y_coords, x_bounds, y_bounds, comp_epsi
     if not np.any(valid_x_y_locs):
         raise IndexError("There are no points within the x y range prescrived.")
 
-    index_valid_range_x = np.where(np.any(valid_x_y_locs, axis=0))
-    index_valid_range_y = np.where(np.any(valid_x_y_locs, axis=1))
+    index_valid_range_0 = np.where(np.any(valid_x_y_locs, axis=1))
+    index_valid_range_1 = np.where(np.any(valid_x_y_locs, axis=0))
 
     # Note: +1 on the maxima because these should be bounds for ranges,
     # i.e. [low_bound, upper_bound+1[ in python
-    return(index_valid_range_x[0][0], index_valid_range_x[0][-1] + 1,
-           index_valid_range_y[0][0], index_valid_range_y[0][-1] + 1
+    return(index_valid_range_0[0][0], index_valid_range_0[0][-1] + 1,
+           index_valid_range_1[0][0], index_valid_range_1[0][-1] + 1
            )

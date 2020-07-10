@@ -29,9 +29,9 @@ print("compute slices corresponding to the domain of interest")
 range_of_interest_lat = [56.5, 60.5]
 range_of_interest_lon = [6.0, 11.0]
 indexes_of_interest = moa.index_ranges_within_bounds(nc_lon, nc_lat, range_of_interest_lon, range_of_interest_lat)
-(min_lon_index, max_lon_index, min_lat_index, max_lat_index) = indexes_of_interest
-nc_lon_red = nc_lon[min_lat_index:max_lat_index, min_lon_index:max_lon_index]
-nc_lat_red = nc_lat[min_lat_index:max_lat_index, min_lon_index:max_lon_index]
+(min_index_0, max_index_0, min_index_1, max_index_1) = indexes_of_interest
+nc_lon_red = nc_lon[min_index_0:max_index_0, min_index_1:max_index_1]
+nc_lat_red = nc_lat[min_index_0:max_index_0, min_index_1:max_index_1]
 
 # TODO: request only the part of the data needed
 print("retrieve surface air pressure data")
@@ -39,7 +39,7 @@ time = 0
 height_0 = 0
 ensemble_member = 0
 nc_data_sea_pressure = np.array(nc_dataset["surface_air_pressure"][time][height_0][ensemble_member][:][:])
-nc_data_sea_pressure = nc_data_sea_pressure[min_lat_index:max_lat_index, min_lon_index:max_lon_index]
+nc_data_sea_pressure = nc_data_sea_pressure[min_index_0:max_index_0, min_index_1:max_index_1]
 
 print("show the data")
 plt_downsample = 1
