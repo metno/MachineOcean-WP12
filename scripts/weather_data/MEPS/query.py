@@ -38,8 +38,17 @@ print("retrieve surface air pressure data")
 time = 0
 height_0 = 0
 ensemble_member = 0
-nc_data_sea_pressure = np.array(nc_dataset["surface_air_pressure"][time][height_0][ensemble_member][:][:])
-nc_data_sea_pressure = nc_data_sea_pressure[min_index_0:max_index_0, min_index_1:max_index_1]
+
+# both these syntaxes should be equivalent, and actually retrieve the full "surface_air_pressure" data field before slicing
+# nc_data_sea_pressure = np.array(nc_dataset["surface_air_pressure"][time][height_0][ensemble_member][:][:])
+# nc_data_sea_pressure = nc_data_sea_pressure[min_index_0:max_index_0, min_index_1:max_index_1]
+# equivalent:
+# nc_data_sea_pressure = np.array(nc_dataset["surface_air_pressure"][ time, height_0, ensemble_member, min_index_0:max_index_0, min_index_1:max_index_1])
+
+# it looks like, to retrive only the indexes wanted, one has to formulate the url by hand; I cannot find another method from the doc / resources online
+# url requests do not follow python conventions; this retrieves [min_index;max_index], max_index is INCLUDED
+url_request = url + "?surface_air_pressure[0][0][0][{}:1:{}][{}:1:{}]".format(min_index_0, max_index_0-1, min_index_1, max_index_1-1)
+nc_data_sea_pressure = np.array(nc4.Dataset(url_request)["surface_air_pressure"][time][height_0][ensemble_member][:][:])
 
 print("show the data")
 plt_downsample = 1
