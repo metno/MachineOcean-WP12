@@ -30,7 +30,7 @@ def check_strict_monotonic(array, list_dimensions=None):
             raise ValueError("Array non stricly monotonic on dim {}".format(dim))
 
 
-def index_ranges_within_bounds(x_coords, y_coords, x_bounds, y_bounds, comp_epsiy=1e-12):
+def index_ranges_within_bounds(x_coords, y_coords, x_bounds, y_bounds, comp_epsilon=1e-12):
     """Select the index ranges on the x and y directions that contain all data having
     x and y coordinates with prescribed ranges.
 
@@ -59,11 +59,11 @@ def index_ranges_within_bounds(x_coords, y_coords, x_bounds, y_bounds, comp_epsi
     check_strict_monotonic(x_coords, [1])
     check_strict_monotonic(y_coords, [0])
 
-    valid_x_locs = np.logical_and(x_coords + comp_epsiy >= x_bounds[0],
-                                  x_coords <= x_bounds[1] + comp_epsiy)
+    valid_x_locs = np.logical_and(x_coords + comp_epsilon >= x_bounds[0],
+                                  x_coords <= x_bounds[1] + comp_epsilon)
 
-    valid_y_locs = np.logical_and(y_coords + comp_epsiy >= y_bounds[0],
-                                  y_coords <= y_bounds[1] + comp_epsiy)
+    valid_y_locs = np.logical_and(y_coords + comp_epsilon >= y_bounds[0],
+                                  y_coords <= y_bounds[1] + comp_epsilon)
 
     valid_x_y_locs = np.logical_and(valid_x_locs,
                                     valid_y_locs)
