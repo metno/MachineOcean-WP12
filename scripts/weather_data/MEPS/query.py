@@ -74,6 +74,6 @@ cb = basemap_obj.colorbar(cs, extend='min', label="sea level pressure", pad=0.50
 
 plt.tight_layout()
 
-plt.savefig("air_pressure_at_sea_level_around_region.pdf")
+plt.savefig("air_pressure_at_sea_level.pdf")
 
 plt.show()
