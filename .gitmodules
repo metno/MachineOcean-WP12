@@ -1,3 +1,6 @@
 [submodule "config"]
 	path = config
 	url = git@gitlab.met.no:vkbo/machineocean-config.git
+[submodule "example_data"]
+	path = example_data
+	url = git@gitlab.met.no:jeanr/machineocean-data.git
