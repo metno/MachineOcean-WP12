@@ -13,3 +13,8 @@ Install dependencies with
 ```
 pip3 install --user -r requirements.txt
 ```
+
+Python3 package dependencies are as follows:
+
+* tensorflow
+* netcdf4
