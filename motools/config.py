@@ -20,9 +20,33 @@ class Config():
         self._confData = {}
 
         self._loadConfig()
-        print(self._confData)
+        # print(self._confData)
 
         return
+
+    ##
+    #  Get Functions
+    ##
+
+    def getSetting(self, group, key):
+        """Returns a setting by pathname, looking up in priority order.
+        """
+        theValue = None
+
+        if not isinstance(group, str):
+            raise ValueError("'group'' must be a string")
+        if not isinstance(key, str):
+            raise ValueError("'key'' must be a string")
+
+        for aRoot in ["USER", "MET", "MAIN"]:
+            if aRoot in self._confData:
+                if group in self._confData[aRoot]["config"]:
+                    if key in self._confData[aRoot]["config"][group]:
+                        return self._confData[aRoot]["config"][group][key]
+
+        logger.error("No config entry found matching %s/%s" % (group, key))
+
+        return theValue
 
     ##
     #  Internal Functions
