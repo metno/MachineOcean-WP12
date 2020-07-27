@@ -21,7 +21,15 @@ __credits__    = [
 ]
 
 # Initiating logging
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("motools")
+logFmt = logging.Formatter(
+    fmt="{levelname:8}  {message:}",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    style="{"
+)
+cHandle = logging.StreamHandler()
+cHandle.setFormatter(logFmt)
+logger.addHandler(cHandle)
 
 # Make sure the interpreter is in UTC in all the following
 os.environ["TZ"] = "UTC"

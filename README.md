@@ -22,11 +22,11 @@ Python3 package dependencies are as follows:
 
 There are three config files used by this tool box:
 
-* `data_config.json` is the main config file, and this file is provided with the repository.
+* `main_config.json` is the main config file, and this file is provided with the repository.
 * `met_config/met_config.json` is the main config file for MET internal use.
   This file is located in a submodule, and only accessible on MET Norway's network.
-  The settings in this file overrides settings in the `data_config.json` file.
+  The settings in this file overrides settings in the `main_config.json` file.
 * `user_config.json` is the user's own config file with user-specific settings.
-  Settings in the `data_config.json` and `met_config.json` file can be overridden here.
+  Settings in the `main_config.json` and `met_config.json` file can be overridden here.
   This file is not provided, but a sample file is provided in the repo.
   Please copy and rename the `user_config_sample.json` file to `user_config.json`.
