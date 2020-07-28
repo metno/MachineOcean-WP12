@@ -18,6 +18,7 @@ Python3 package dependencies are as follows:
 
 * tensorflow
 * netcdf4
+* sentinelsat
 
 ## Configuration
 
@@ -31,3 +32,15 @@ There are three config files used by this tool box:
   Settings in the `main_config.json` and `met_config.json` file can be overridden here.
   This file is not provided, but a sample file is provided in the repo.
   Please copy and rename the `user_config_sample.json` file to `user_config.json`.
+
+## Debugging
+
+The default logging level of MOTools is `INFO`.
+To change logging level, set the environment variable `MOTOOLS_LOGLEVEL` to another value.
+Valid values are `CRITICAL`, `ERROR`, `WARNING`, `INFO`, and `DEBUG`.
+See the Python logging [documentation](https://docs.python.org/3/library/logging.html#logging-levels) for more details.
+
+For instance:
+```bash
+export MOTOOLS_LOGLEVEL=DEBUG
+```

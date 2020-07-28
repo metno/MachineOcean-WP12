@@ -8,6 +8,9 @@ import logging
 import os
 import time
 
+from .config import Config
+from .sentineldata import SentinelData
+
 __package__   = "Machine Ocean Tools"
 __author__    = "MET Norway"
 __copyright__ = "Copyright 2020, MET Norway"
@@ -20,16 +23,25 @@ __credits__   = [
     "Martin Lilleeng Sætra",
 ]
 
+__all__ = [
+    "Config", "SentinelData"
+]
+
 # Initiating logging
-logger = logging.getLogger("motools")
-logFmt = logging.Formatter(
-    fmt="{levelname:8}  {message:}",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    style="{"
-)
-cHandle = logging.StreamHandler()
-cHandle.setFormatter(logFmt)
-logger.addHandler(cHandle)
+strLevel = os.environ.get("MOTOOLS_LOGLEVEL", "INFO")
+if hasattr(logging, strLevel):
+    logLevel = getattr(logging, strLevel)
+else:
+    print("Invalid logging level '%s' in environment variable MOTOOLS_LOGLEVEL" % strLevel)
+    logLevel = logging.INFO
+
+if logLevel < logging.INFO:
+    logFormat = "[{asctime:s}] {levelname:8s} {message:}"
+else:
+    logFormat = "{levelname:8s} {message:}"
+
+logging.basicConfig(format=logFormat, style="{", level=logLevel)
+logger = logging.getLogger(__name__)
 
 # Make sure the interpreter is in UTC in all the following
 os.environ["TZ"] = "UTC"

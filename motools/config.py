@@ -10,7 +10,7 @@ import logging
 
 from os import path
 
-logger = logging.getLogger("motools")
+logger = logging.getLogger(__name__)
 
 class Config():
 
