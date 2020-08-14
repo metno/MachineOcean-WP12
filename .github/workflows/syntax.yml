@@ -1,0 +1,27 @@
+name: Flake 8 Checks
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  checkSyntax:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Python Setup
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
+          architecture: x64
+      - name: Checkout MachineOcean-WP12
+        uses: actions/checkout@v2
+      - name: Install flake8
+        run: pip install flake8
+      - name: Check for Syntax Error on novelWriter
+        run: flake8 nw --count --select=E9,F63,F7,F82 --show-source --statistics
+      - name: Check for Syntax Error on Tests
+        run: flake8 tests --count --select=E9,F63,F7,F82 --show-source --statistics
+      - name: Check for Code Style on novelWriter
+        run: flake8 nw --count --max-line-length=99 --ignore E203,E221,E226,E241,E251,E261,E266,E302,E305 --show-source --statistics
