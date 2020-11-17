@@ -1,0 +1,7 @@
+netcdf4
+numpy
+matplotlib
+cartopy
+xarray
+toolz
+dask # in case of missing deps; please try replacing with dask[array] or dask[complete]
