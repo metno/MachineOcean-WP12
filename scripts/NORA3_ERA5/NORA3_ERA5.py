@@ -10,6 +10,7 @@ import xarray as xr
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 from datetime import datetime
+from datetime import timedelta
 from dateutil.relativedelta import relativedelta
 
 def get_timeseries(param, lat, lon, start_time, end_time, use_atm=True):
@@ -94,10 +95,73 @@ def get_nora3_timeseries(param, lat, lon, start_time, end_time, use_atm=True):
     Data directories: 
     /lustre/storeB/project/fou/om/WINDSURFER/HM40h12/netcdf [1997-08, 2019-12]
     """
-    return xr.DataArray([], dims={"time": []})
+
+    # sanity check arguments
+    available_atm_params = ["air_pressure_at_sea_level", "x_wind_10m", "y_wind_10m"]
+    if param not in available_atm_params:
+        raise RuntimeError("Undefined parameter: " + param)
+    if 44.0 > lat > 83.0:
+        raise RuntimeError("Latitude (lat) must be in the interval [44.0, 83.0]")
+    if -30.0 > lon > 85.0:
+        raise RuntimeError("Longitude (lon) must be in the interval [-30.0, 85.0]")
+    
+    print("From " + start_time.strftime("%Y%m%d-%H"))
+    print("To " + end_time.strftime("%Y%m%d-%H"))
+
+    # find and open correct netCDF file(s)
+    filenames = []
+    hour = timedelta(hours=1)
+    current_time = start_time
+
+    if param in available_atm_params:
+        while current_time <= end_time:
+            current_time_with_offset = current_time - timedelta(hours=4)
+            
+            # find correct period folder
+            if current_time_with_offset.hour < 6:
+                period = 0
+            elif current_time_with_offset.hour < 12:
+                period = 6
+            elif current_time_with_offset.hour < 18:
+                period = 12
+            else:
+                period = 18
+            
+            # find correct index file
+            index_file = current_time.hour - period
+            if index_file < 0:
+                index_file += 24
+
+            filenames.append(
+                "/lustre/storeB/project/fou/om/WINDSURFER/HM40h12/netcdf/{year}/{month}/{day}/{period:02d}/fc{year}{month}{day}{period:02d}_00{index_file}_fp.nc" \
+                .format(year=current_time_with_offset.strftime("%Y"), 
+                        month=current_time_with_offset.strftime("%m"), 
+                        day=current_time_with_offset.strftime("%d"), 
+                        period=period, index_file=index_file))
+            current_time += hour
+    else:
+        raise RuntimeError(param + " is not found in NORA3 data set")
+    
+    print(filenames)
+    nora3 = xr.open_mfdataset(filenames)
+
+    # find coordinates in data set projection
+    data_crs = ccrs.LambertConformal(central_longitude=-42.0) #, standard_parallels=[66.3])
+    x, y = data_crs.transform_point(lon, lat, src_crs=ccrs.PlateCarree())
+
+    # extract data set
+    nora3_da = nora3[param].sel(x=x, y=y, method="nearest")
+    nora3_da = nora3_da.sel(time=slice(start_time, end_time))
+
+    # empty xarray
+    #return xr.DataArray([], dims={"time": []})
+
+    # return time series as xarray
+    return nora3_da
 
 # test time series extraction and plotting from ERA5 data set
-ds, da = get_timeseries("swh", 58.0, 10.0, datetime(2019, 1, 1, 0, 0, 0), datetime(2019, 2, 1, 23, 0, 0))
+ds, da = get_timeseries("x_wind_10m", 58.0, 10.0, 
+        datetime(2019, 2, 1, 0, 0, 0), datetime(2019, 2, 1, 12, 0, 0))
 print(ds)
 print(da)
 print(da.values[0]) # .values is a numpy.ndarray
