@@ -30,7 +30,7 @@ def get_timeseries(param, lat, lon, start_time, end_time, use_atm=True):
     /lustre/storeB/project/fou/om/WINDSURFER/HM40h12/netcdf [1997-08, 2019-12]
     """
     available_atm_params = ["msl", "u10", "v10"]
-    available_wave_params = ["msl", "mwd", "swh"]
+    available_wave_params = ["msl", "mwd", "mp2", "pp1d", "swh"]
 
     atm_params_nora3 = {
         "msl": "air_pressure_at_sea_level",
@@ -59,12 +59,16 @@ def get_era5_timeseries(param, lat, lon, start_time, end_time, use_atm=True):
     [start_time, end_time] with a temporal resolution of one hour. The nearest 
     grid point will be used.
 
+    TODO: Selection of the nearest wet (not missing_value) point for wave params using
+    xarray. This is not straightforward to implement at this point
+    (see also https://github.com/pydata/xarray/issues/644)
+
     Data directories: 
     /lustre/storeB/project/fou/om/ERA/ERA5 [1979-1, 2019-12]
     """
     data_dir = "/lustre/storeB/project/fou/om/ERA/ERA5"
     available_atm_params = ["msl", "u10", "v10"]
-    available_wave_params = ["msl", "mwd", "swh"]
+    available_wave_params = ["msl", "mwd", "mp2", "pp1d", "swh"]
     
     # sanity check arguments
     if param not in available_atm_params and param not in available_wave_params:
@@ -161,30 +165,38 @@ def get_nora3_timeseries(param, lat, lon, start_time, end_time):
     
     nora3 = xr.open_mfdataset(filenames)
 
-    # find coordinates in data set projection
-    data_crs = ccrs.LambertConformal(central_longitude=-42.0, central_latitude=66.3,
-                standard_parallels=[66.3, 66.3], 
-                globe=ccrs.Globe(datum="WGS84", ellipse="WGS84",
-                semimajor_axis=6371000.0, semiminor_axis=6371000.0))
-    x, y = data_crs.transform_point(lon, lat, src_crs=ccrs.PlateCarree())
+    # find coordinates in data set projection by transformation:
+    #data_crs = ccrs.LambertConformal(central_longitude=-42.0, central_latitude=66.3,
+    #            standard_parallels=[66.3, 66.3], 
+    #            globe=ccrs.Globe(datum="WGS84",
+    #            semimajor_axis=6371000.0))
+    #x, y = data_crs.transform_point(lon, lat, src_crs=ccrs.PlateCarree())
 
     #nora3_da_lon = nora3["longitude"].sel(x=x, y=y, method="nearest")
     #nora3_da_lat = nora3["latitude"].sel(x=x, y=y, method="nearest")
     #print("Projected lon, lat: " + str(nora3_da_lon.values) + ", " + str(nora3_da_lat.values))
+    
+    # find coordinates in data set projection by lookup in lon-lat variables
+    abslat = np.abs(nora3.latitude-lat)
+    abslon = np.abs(nora3.longitude-lon)
+    cor = np.maximum(abslon, abslat)
+    ([y_idx], [x_idx]) = np.where(cor == np.min(cor))
+
+    #print("Projected lon, lat: " 
+    #        + str(nora3["longitude"].isel(x=x_idx, y=y_idx).values) + ", " 
+    #        + str(nora3["latitude"].isel(x=x_idx, y=y_idx).values))
 
     # extract data set
-    nora3_da = nora3[param].sel(x=x, y=y, method="nearest")
+    #nora3_da = nora3[param].sel(x=x, y=y, method="nearest")
+    nora3_da = nora3[param].isel(x=x_idx, y=y_idx)
     nora3_da = nora3_da.sel(time=slice(start_time, end_time))
-
-    # empty xarray
-    #return xr.DataArray([], dims={"time": []})
 
     # return time series as xarray
     return nora3_da
 
 # test time series extraction and plotting from NORA3/ERA5 data set
 ds, da = get_timeseries("u10", 58.0, 20.0, 
-        datetime(1997, 8, 1, 0, 0, 0), datetime(1997, 8, 1, 2, 0, 0))
+        datetime(1997, 8, 1, 4, 0, 0), datetime(1997, 8, 1, 5, 0, 0))
 print(ds)
 print(da)
 print(da.values[0]) # .values is a numpy.ndarray
