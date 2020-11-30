@@ -14,7 +14,7 @@ from datetime import datetime
 from datetime import timedelta
 from dateutil.relativedelta import relativedelta
 
-def get_timeseries(param, lat, lon, start_time, end_time, use_atm=True):
+def get_timeseries(param, lon, lat, start_time, end_time, use_atm=True):
     """Time series extraction from NORA3 and ERA5.
 
     NOTE: Use ERA5 parameter names. See atm_params_nora3 for NORA3 equivalents
@@ -52,7 +52,7 @@ def get_timeseries(param, lat, lon, start_time, end_time, use_atm=True):
     else:
         return ("ERA5", get_era5_timeseries(param, lat, lon, start_time, end_time, use_atm))
 
-def get_era5_timeseries(param, lat, lon, start_time, end_time, use_atm=True):
+def get_era5_timeseries(param, lon, lat, start_time, end_time, use_atm=True):
     """Time series extraction from ERA5.
 
     Returns time series xarray for parameter param at location (lat, lon) in interval
@@ -105,7 +105,7 @@ def get_era5_timeseries(param, lat, lon, start_time, end_time, use_atm=True):
     # return time series as xarray
     return era5_da
 
-def get_nora3_timeseries(param, lat, lon, start_time, end_time):
+def get_nora3_timeseries(param, lon, lat, start_time, end_time):
     """Time series extraction from NORA3.
 
     Returns time series xarray for parameter param at location (lat, lon) in interval
@@ -195,61 +195,38 @@ def get_nora3_timeseries(param, lat, lon, start_time, end_time):
     return nora3_da
 
 # test time series extraction and plotting from NORA3/ERA5 data set
-ds, da = get_timeseries("u10", 58.0, 20.0, 
-        datetime(1997, 8, 1, 4, 0, 0), datetime(1997, 8, 1, 5, 0, 0))
-print(ds)
-print(da)
-print(da.values[0]) # .values is a numpy.ndarray
-da.plot()
+#ds, da = get_timeseries("u10", 20.0, 58.0, 
+#        datetime(1997, 8, 1, 4, 0, 0), datetime(1997, 8, 1, 5, 0, 0))
+#print(ds)
+#print(da)
+#print(da.values[0]) # .values is a numpy.ndarray
+#da.plot()
 
-#%%
-def plot_era5_test():
-    """Hardcoded experimental function. Do not use! / Will be removed."""
-    era5 = xr.open_mfdataset("/lustre/storeB/project/fou/om/ERA/ERA5/atm/era5_atm_CDS_201901.nc")
+aggr_water_level_data = xr.open_mfdataset(
+    "/lustre/storeB/project/IT/geout/machine-ocean/prepared_datasets/storm_surge/aggregated_water_level_data/aggregated_water_level_observations_with_pytide_prediction_dataset.nc4")
 
-    print(era5.var)
+station_ids = aggr_water_level_data["stationid"]
+station_lons = aggr_water_level_data["longitude"]
+station_lats = aggr_water_level_data["latitude"]
 
-    era5_da = era5.msl.sel(time="2019-01-01 00:00:00", #expver=5,
-        longitude=slice(6.0, 11.0), latitude=slice(60.5, 56.5))
+out_da = xr.Dataset()
+out_da["stationid"] = station_ids
 
-    print(era5_da)
+dataarrays = []
+for (station_id, station_lon, station_lat) in zip(station_ids, station_lons, station_lats):
+    print("Writing timeseries for station " + str(station_id.values) + " at " 
+            + str(station_lon.values) + ", " + str(station_lat.values))
 
-    ax = plt.axes(projection=ccrs.PlateCarree())
-    ax.coastlines() 
-    era5_da.plot()
-    plt.show()
+    da = get_era5_timeseries("msl", station_lon, station_lat, 
+            datetime(1979, 1, 1), datetime(1979, 1, 2)) # datetime(2019, 12, 31)
+    dataarrays.append(da)
 
-# %%
+combined = xr.concat(dataarrays, dim="station")
 
-def plot_nora3_test():
-    """Hardcoded experimental function. Do not use! / Will be removed."""
-    nora3 = xr.open_mfdataset("/lustre/storeB/project/fou/om/WINDSURFER/HM40h12/netcdf/2019/01/01/00/fc*00*_fp.nc")
-    nora3.set_coords(["latitude", "longitude"])
-
-    print(nora3.var)
-    print(nora3.projection_lambert)
-
-    # find x, y from lat, lon
-    lat = [56.5, 60.5]
-    lon = [6.0, 11.0]
-    data_crs = ccrs.LambertConformal(central_longitude=-42.0) #, standard_parallels=[66.3])
-    x = np.zeros(2)
-    y = np.zeros(2)
-    x[0], y[0] = data_crs.transform_point(lon[0], lat[0], src_crs=ccrs.PlateCarree())
-    x[1], y[1] = data_crs.transform_point(lon[1], lat[1], src_crs=ccrs.PlateCarree())
-
-    print("x0: {}, x1: {}, y1: {}, y2: {}".format(x[0], x[1], y[0], y[1]))
-
-    nora3_da = nora3.air_pressure_at_sea_level.sel(time="2019-01-01 04:00:00",
-        height_above_msl=0.0,
-        x=slice(x[0], x[1]), y=slice(y[0], y[1]))
-        
-    print(nora3_da)
-
-    ax = plt.axes(projection=ccrs.PlateCarree())
-    ax.coastlines() 
-    nora3_da.plot.pcolormesh("longitude", "latitude")
-    plt.show()
-
+out_da["msl"] = combined
+print(out_da["station"].values)
+print(out_da["stationid"].values)
+print(out_da)
+out_da.to_netcdf("aggregated_era5_data_incomplete.nc4", format="NETCDF4", unlimited_dims="time")
 
 # %%
