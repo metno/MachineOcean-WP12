@@ -96,7 +96,7 @@ def get_era5_timeseries(param, lon, lat, start_time, end_time, use_atm=True):
     else:
         raise RuntimeError(param + " is not found in ERA5 wave data set (try use_atm=True)")
     
-    era5 = xr.open_mfdataset(filenames, parallel=True)
+    era5 = xr.open_mfdataset(filenames, parallel=True, autoclose=True)
 
     # extract data set
     era5_da = era5[param].sel(longitude=lon, latitude=lat, method="nearest")
@@ -163,7 +163,7 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
     else:
         raise RuntimeError(param + " is not found in NORA3 data set")
     
-    nora3 = xr.open_mfdataset(filenames)
+    nora3 = xr.open_mfdataset(filenames, autoclose=True)
 
     # find coordinates in data set projection by transformation:
     #data_crs = ccrs.LambertConformal(central_longitude=-42.0, central_latitude=66.3,
@@ -194,39 +194,60 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
     # return time series as xarray
     return nora3_da
 
-# test time series extraction and plotting from NORA3/ERA5 data set
-#ds, da = get_timeseries("u10", 20.0, 58.0, 
-#        datetime(1997, 8, 1, 4, 0, 0), datetime(1997, 8, 1, 5, 0, 0))
-#print(ds)
-#print(da)
-#print(da.values[0]) # .values is a numpy.ndarray
-#da.plot()
+if __name__ == "__main__":
+    # TODO: fix memory prob with to_netcdf(),
+    #       find nearest "wet point" and describe difference in latlon for these stations, 
+    #       (see https://gitlab.met.no/jeanr/interact_with_roms/-/tree/master/lat_lon_to_ROMS_timeseries)
+    #       extract functions (choose time stride, parameter, input and output filenames),
+    #       produce full ERA5 timeseries for all params on PPI
 
-aggr_water_level_data = xr.open_mfdataset(
-    "/lustre/storeB/project/IT/geout/machine-ocean/prepared_datasets/storm_surge/aggregated_water_level_data/aggregated_water_level_observations_with_pytide_prediction_dataset.nc4")
+    # write msl timeseries for the complete ERA5 period for
+    # every observation in obs data file (see line below)
+    aggr_water_level_data = xr.open_mfdataset(
+        "/lustre/storeB/project/IT/geout/machine-ocean/prepared_datasets/storm_surge/aggregated_water_level_data/aggregated_water_level_observations_with_pytide_prediction_dataset.nc4")
 
-station_ids = aggr_water_level_data["stationid"]
-station_lons = aggr_water_level_data["longitude"]
-station_lats = aggr_water_level_data["latitude"]
+    station_ids = aggr_water_level_data["stationid"]
+    station_lons = aggr_water_level_data["longitude"]
+    station_lats = aggr_water_level_data["latitude"]
 
-out_da = xr.Dataset()
-out_da["stationid"] = station_ids
+    out_da = xr.Dataset()
+    out_da["stationid"] = station_ids
+    out_da["longitude_station"] = station_lons
+    out_da["latitude_station"] = station_lats
 
-dataarrays = []
-for (station_id, station_lon, station_lat) in zip(station_ids, station_lons, station_lats):
-    print("Writing timeseries for station " + str(station_id.values) + " at " 
-            + str(station_lon.values) + ", " + str(station_lat.values))
+    dataarrays = []
+    for (station_id, station_lon, station_lat) in zip(station_ids, station_lons, station_lats):
+        print("Writing timeseries for station " + str(station_id.values) + " at " 
+                + str(station_lon.values) + ", " + str(station_lat.values))
 
-    da = get_era5_timeseries("msl", station_lon, station_lat, 
-            datetime(1979, 1, 1), datetime(1979, 1, 2)) # datetime(2019, 12, 31)
-    dataarrays.append(da)
+        da = get_era5_timeseries("msl", station_lon, station_lat, 
+                datetime(1979, 1, 1, 18), datetime(1979, 1, 1, 19))#datetime(2019, 12, 31))
+        
+        dataarrays.append(da)
+    
+    combined = xr.concat(dataarrays, dim="station")
 
-combined = xr.concat(dataarrays, dim="station")
+    out_da["msl"] = combined
 
-out_da["msl"] = combined
-print(out_da["station"].values)
-print(out_da["stationid"].values)
-print(out_da)
-out_da.to_netcdf("aggregated_era5_data_incomplete.nc4", format="NETCDF4", unlimited_dims="time")
+    # ensure CF compliance
+    out_da.attrs["Conventions"] = "CF-1.8"
+    out_da["longitude"].attrs["units"] = "degrees_east"
+    out_da["longitude"].attrs["long_name"] = "longitude"
+    out_da["longitude"].attrs["description"] = "longitude of closest data point to station"
 
-# %%
+    out_da["longitude_station"].attrs["units"] = "degrees_east"
+    out_da["longitude_station"].attrs["long_name"] = "longitude_station"
+
+    out_da["latitude"].attrs["units"] = "degrees_north"
+    out_da["latitude"].attrs["long_name"] = "latitude"
+    out_da["latitude"].attrs["description"] = "latitude of closest data point to station"
+
+    out_da["latitude_station"].attrs["units"] = "degrees_north"
+    out_da["latitude_station"].attrs["long_name"] = "latitude_station"
+
+    print(out_da)
+    out_da.to_netcdf("aggregated_era5_data_incomplete_test.nc", 
+                        format="NETCDF4", engine="netcdf4", unlimited_dims="time",
+                        encoding={"msl": {"dtype": "float32", "zlib": False, "_FillValue": 1.0e37}})
+
+    # %%
