@@ -7,12 +7,51 @@ Install requirements with pip3 install -r requirements.txt
 import netCDF4 as nc4
 import numpy as np
 import os
+import argparse
 import xarray as xr
 import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 from datetime import datetime
 from datetime import timedelta
 from dateutil.relativedelta import relativedelta
+
+def get_closest_water_point(start_i, start_j, data, missing_value=-32767):
+    """
+    Code from josteinb@met.no (adapted)
+
+    desc:
+        Breadth first search function to find index of nearest
+        non-missing_value point
+    args:
+        - start_i: Start index of i
+        - start_j: Start index of j
+        - data: grid with data
+        - missing_value: value of missing_value for paramter
+    return:
+        - index of point
+    """
+    dirs = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+    visited = set()
+    q = [(start_i, start_j)]    # init queue to start pos
+    count = 0
+
+    # while something in queue
+    while q:
+        current = q.pop(0)      # pop the first in waiting queue
+        # if we have visited this before
+        if current in visited:
+            continue
+        visited.add(current)    # Add to set of visited
+        # If not in border list
+        # Test if this is land, if true go to next in queue, else return idx
+        if data[current[0], current[1]] != missing_value:
+            return current[0], current[1]
+        count += 1      # updates the count
+        # Loop over neighbours and add to queue
+        for di, dj in dirs:
+            new_i = current[0]+di
+            new_j = current[1]+dj
+            q.append((new_i, new_j))
 
 def get_timeseries(param, lon, lat, start_time, end_time, use_atm=True):
     """Time series extraction from NORA3 and ERA5.
@@ -58,10 +97,6 @@ def get_era5_timeseries(param, lon, lat, start_time, end_time, use_atm=True):
     Returns time series xarray for parameter param at location (lat, lon) in interval
     [start_time, end_time] with a temporal resolution of one hour. The nearest 
     grid point will be used.
-
-    TODO: Selection of the nearest wet (not missing_value) point for wave params using
-    xarray. This is not straightforward to implement at this point
-    (see also https://github.com/pydata/xarray/issues/644)
 
     Data directories: 
     /lustre/storeB/project/fou/om/ERA/ERA5 [1979-1, 2019-12]
@@ -194,21 +229,16 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
     # return time series as xarray
     return nora3_da
 
-if __name__ == "__main__":
-    # TODO: fix memory prob with to_netcdf(),
-    #       find nearest "wet point" and describe difference in latlon for these stations, 
-    #       (see https://gitlab.met.no/jeanr/interact_with_roms/-/tree/master/lat_lon_to_ROMS_timeseries)
-    #       extract functions (choose time stride, parameter, input and output filenames),
-    #       produce full ERA5 timeseries for all params on PPI
+def write_timeseries(stations_file, output_file, param, start_time, end_time):
+    """WiP: Get stations (w/locations), do time series extraction from ERA5/NORA3, and write results to netCDF file."""
 
     # write msl timeseries for the complete ERA5 period for
     # every observation in obs data file (see line below)
-    aggr_water_level_data = xr.open_mfdataset(
-        "/lustre/storeB/project/IT/geout/machine-ocean/prepared_datasets/storm_surge/aggregated_water_level_data/aggregated_water_level_observations_with_pytide_prediction_dataset.nc4")
+    stations = xr.open_mfdataset(stations_file)
 
-    station_ids = aggr_water_level_data["stationid"]
-    station_lons = aggr_water_level_data["longitude"]
-    station_lats = aggr_water_level_data["latitude"]
+    station_ids = stations["stationid"]
+    station_lons = stations["longitude"]
+    station_lats = stations["latitude"]
 
     out_da = xr.Dataset()
     out_da["stationid"] = station_ids
@@ -220,14 +250,14 @@ if __name__ == "__main__":
         print("Writing timeseries for station " + str(station_id.values) + " at " 
                 + str(station_lon.values) + ", " + str(station_lat.values))
 
-        da = get_era5_timeseries("msl", station_lon, station_lat, 
-                datetime(1979, 1, 1, 18), datetime(1979, 1, 1, 19))#datetime(2019, 12, 31))
+        da = get_era5_timeseries(param, station_lon, station_lat, 
+                start_time, end_time)
         
         dataarrays.append(da)
     
     combined = xr.concat(dataarrays, dim="station")
 
-    out_da["msl"] = combined
+    out_da[param] = combined
 
     # ensure CF compliance
     out_da.attrs["Conventions"] = "CF-1.8"
@@ -246,8 +276,46 @@ if __name__ == "__main__":
     out_da["latitude_station"].attrs["long_name"] = "latitude_station"
 
     print(out_da)
-    out_da.to_netcdf("aggregated_era5_data_incomplete_test.nc", 
+    out_da.to_netcdf(output_file, 
                         format="NETCDF4", engine="netcdf4", unlimited_dims="time",
-                        encoding={"msl": {"dtype": "float32", "zlib": False, "_FillValue": 1.0e37}})
+                        encoding={param: {"dtype": "float32", "zlib": False, "_FillValue": 1.0e37}})
 
-    # %%
+if __name__ == "__main__":
+    # TODO: fix memory prob with to_netcdf(),
+    #       find nearest "wet point" and describe difference in latlon for these stations, 
+    #       (see https://gitlab.met.no/jeanr/interact_with_roms/-/tree/master/lat_lon_to_ROMS_timeseries)
+    #       extract functions (choose time stride, parameter, input and output filenames),
+    #       produce full ERA5 timeseries for all params on PPI
+
+    # parse optional arguments
+    parser = argparse.ArgumentParser(description="Extract timeseries from NORA3/ERA5 \
+        data sets based on location and time interval fetched from netCDF-files containing \
+        stations, and write to netCDF.")
+    parser.add_argument('-i','--input-stations', metavar='FILENAME', \
+        help='input file name containing stations (netCDF format)',required=False)
+    parser.add_argument('-o','--output-file', metavar='FILENAME', \
+        help='output file',required=False)
+    parser.add_argument('-p','--parameter', metavar='PARAMETER', \
+        help='parameter name (netCDF name)',required=False)
+    parser.add_argument('-s','--start-time', metavar='YYYY-MM-DDTHH:MM', \
+        help='input file name containing stations (netCDF format)',required=False)
+    parser.add_argument('-e','--end-time', metavar='YYYY-MM-DDTHH:MM', \
+        help='input file name containing stations (netCDF format)',required=False)
+
+    #args = parser.parse_args()
+
+    #if not len(sys.argv) > 1:
+    #    print("Provide arguments. See NORA3_ERA5.py --help")
+
+    #start_time = datetime.strptime(args.start_time, '%Y-%m-%dT%H:%M.%f')
+    #end_time = datetime.strptime(args.end_time, '%Y-%m-%dT%H:%M.%f')
+    #write_timeseries(args.input_stations, args.output_file, args.param, start_time, end_time)
+
+    input_stations = "/lustre/storeB/project/IT/geout/machine-ocean/prepared_datasets/storm_surge/aggregated_water_level_data/aggregated_water_level_observations_with_pytide_prediction_dataset.nc4"
+    output_file = "aggregated_era5_data_incomplete_test.nc"
+    param = "msl"
+    start_time = datetime(1979, 1, 1, 18)
+    end_time = datetime(1979, 1, 1, 19) #datetime(2019, 12, 31))
+    write_timeseries(input_stations, output_file, param, start_time, end_time)
+
+# %%
