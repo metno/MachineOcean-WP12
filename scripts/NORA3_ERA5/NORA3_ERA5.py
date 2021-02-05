@@ -9,7 +9,6 @@ import numpy as np
 import os
 import argparse
 import xarray as xr
-import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 from datetime import datetime
 from datetime import timedelta
@@ -131,7 +130,7 @@ def get_era5_timeseries(param, lon, lat, start_time, end_time, use_atm=True):
     else:
         raise RuntimeError(param + " is not found in ERA5 wave data set (try use_atm=True)")
     
-    era5 = xr.open_mfdataset(filenames, parallel=True, autoclose=True)
+    era5 = xr.open_mfdataset(filenames, parallel=True)
 
     # extract data set
     era5_da = era5[param].sel(longitude=lon, latitude=lat, method="nearest")
@@ -198,7 +197,7 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
     else:
         raise RuntimeError(param + " is not found in NORA3 data set")
     
-    nora3 = xr.open_mfdataset(filenames, autoclose=True)
+    nora3 = xr.open_mfdataset(filenames)
 
     # find coordinates in data set projection by transformation:
     #data_crs = ccrs.LambertConformal(central_longitude=-42.0, central_latitude=66.3,
@@ -241,7 +240,7 @@ def write_timeseries(stations_file, output_file, param, start_time, end_time):
     station_lats = stations["latitude"]
 
     out_da = xr.Dataset()
-    out_da["stationid"] = station_ids
+    out_da["stationid"] = station_ids.astype('|S')
     out_da["longitude_station"] = station_lons
     out_da["latitude_station"] = station_lats
 
@@ -281,26 +280,23 @@ def write_timeseries(stations_file, output_file, param, start_time, end_time):
                         encoding={param: {"dtype": "float32", "zlib": False, "_FillValue": 1.0e37}})
 
 if __name__ == "__main__":
-    # TODO: fix memory prob with to_netcdf(),
-    #       find nearest "wet point" and describe difference in latlon for these stations, 
+    # TODO: - find nearest "wet point" and describe difference in latlon for these stations, 
     #       (see https://gitlab.met.no/jeanr/interact_with_roms/-/tree/master/lat_lon_to_ROMS_timeseries)
-    #       extract functions (choose time stride, parameter, input and output filenames),
-    #       produce full ERA5 timeseries for all params on PPI
 
     # parse optional arguments
-    parser = argparse.ArgumentParser(description="Extract timeseries from NORA3/ERA5 \
-        data sets based on location and time interval fetched from netCDF-files containing \
-        stations, and write to netCDF.")
-    parser.add_argument('-i','--input-stations', metavar='FILENAME', \
-        help='input file name containing stations (netCDF format)',required=False)
-    parser.add_argument('-o','--output-file', metavar='FILENAME', \
-        help='output file',required=False)
-    parser.add_argument('-p','--parameter', metavar='PARAMETER', \
-        help='parameter name (netCDF name)',required=False)
-    parser.add_argument('-s','--start-time', metavar='YYYY-MM-DDTHH:MM', \
-        help='input file name containing stations (netCDF format)',required=False)
-    parser.add_argument('-e','--end-time', metavar='YYYY-MM-DDTHH:MM', \
-        help='input file name containing stations (netCDF format)',required=False)
+    #parser = argparse.ArgumentParser(description="Extract timeseries from NORA3/ERA5 \
+    #    data sets based on location and time interval fetched from netCDF-files containing \
+    #    stations, and write to netCDF.")
+    #parser.add_argument('-i','--input-stations', metavar='FILENAME', \
+    #    help='input file name containing stations (netCDF format)',required=False)
+    #parser.add_argument('-o','--output-file', metavar='FILENAME', \
+    #    help='output file',required=False)
+    #parser.add_argument('-p','--parameter', metavar='PARAMETER', \
+    #    help='parameter name (netCDF name)',required=False)
+    #parser.add_argument('-s','--start-time', metavar='YYYY-MM-DDTHH:MM', \
+    #    help='input file name containing stations (netCDF format)',required=False)
+    #parser.add_argument('-e','--end-time', metavar='YYYY-MM-DDTHH:MM', \
+    #    help='input file name containing stations (netCDF format)',required=False)
 
     #args = parser.parse_args()
 
@@ -311,6 +307,7 @@ if __name__ == "__main__":
     #end_time = datetime.strptime(args.end_time, '%Y-%m-%dT%H:%M.%f')
     #write_timeseries(args.input_stations, args.output_file, args.param, start_time, end_time)
 
+    # hardcoded example - extracting msl from start_time to end_time for all stations contained in the input_stations nedCDF file
     input_stations = "/lustre/storeB/project/IT/geout/machine-ocean/prepared_datasets/storm_surge/aggregated_water_level_data/aggregated_water_level_observations_with_pytide_prediction_dataset.nc4"
     output_file = "aggregated_era5_data_incomplete_test.nc"
     param = "msl"
