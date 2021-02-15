@@ -1,6 +1,5 @@
 netcdf4
 numpy
-matplotlib
 cartopy
 xarray
 toolz
