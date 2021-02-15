@@ -9,11 +9,64 @@ import numpy as np
 import os
 import argparse
 import xarray as xr
-import matplotlib.pyplot as plt
 import cartopy.crs as ccrs
 from datetime import datetime
 from datetime import timedelta
 from dateutil.relativedelta import relativedelta
+
+def _expand_variable(nc_variable, data, expanding_dim, nc_shape, added_size):
+    """For time deltas, we must ensure that we use the same encoding as
+    what was previously stored.
+    We likely need to do this as well for variables that had custom
+    econdings too
+
+    Author: Mark Harfouche (https://github.com/pydata/xarray/issues/1672#issuecomment-685222909)
+    """
+    if hasattr(nc_variable, 'calendar'):
+        
+        data.encoding = {
+            'units': nc_variable.units,
+            'calendar': nc_variable.calendar,
+        }
+    data_encoded = xr.conventions.encode_cf_variable(data) # , name=name)
+    left_slices = data.dims.index(expanding_dim)
+    right_slices = data.ndim - left_slices - 1
+    nc_slice   = (slice(None),) * left_slices + (slice(nc_shape, nc_shape + added_size),) + (slice(None),) * (right_slices)
+    nc_variable[nc_slice] = data_encoded.data
+        
+def append_to_netcdf(filename, ds_to_append, unlimited_dims):
+    """Append an xarray DataSet to unlimited_dim(s) in an existing netCDF file.
+    
+    Author: Mark Harfouche (https://github.com/pydata/xarray/issues/1672#issuecomment-685222909)
+    """
+    if isinstance(unlimited_dims, str):
+        unlimited_dims = [unlimited_dims]
+        
+    if len(unlimited_dims) != 1:
+        # TODO: change this so it can support multiple expanding dims
+        raise ValueError(
+            "We only support one unlimited dim for now, "
+            f"got {len(unlimited_dims)}.")
+
+    unlimited_dims = list(set(unlimited_dims))
+    expanding_dim = unlimited_dims[0]
+    
+    with nc4.Dataset(filename, mode='a') as nc:
+        nc_dims = set(nc.dimensions.keys())
+
+        nc_coord = nc[expanding_dim]
+        nc_shape = len(nc_coord)
+        
+        added_size = len(ds_to_append[expanding_dim])
+        variables, attrs = xr.conventions.encode_dataset_coordinates(ds_to_append)
+
+        for name, data in variables.items():
+            if expanding_dim not in data.dims:
+                # Nothing to do, data assumed to the identical
+                continue
+
+            nc_variable = nc[name]
+            _expand_variable(nc_variable, data, expanding_dim, nc_shape, added_size)
 
 def get_closest_water_point(start_i, start_j, data, missing_value=-32767):
     """
@@ -131,7 +184,7 @@ def get_era5_timeseries(param, lon, lat, start_time, end_time, use_atm=True):
     else:
         raise RuntimeError(param + " is not found in ERA5 wave data set (try use_atm=True)")
     
-    era5 = xr.open_mfdataset(filenames, parallel=True, autoclose=True)
+    era5 = xr.open_mfdataset(filenames, parallel=True)
 
     # extract data set
     era5_da = era5[param].sel(longitude=lon, latitude=lat, method="nearest")
@@ -198,7 +251,7 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
     else:
         raise RuntimeError(param + " is not found in NORA3 data set")
     
-    nora3 = xr.open_mfdataset(filenames, autoclose=True)
+    nora3 = xr.open_mfdataset(filenames)
 
     # find coordinates in data set projection by transformation:
     #data_crs = ccrs.LambertConformal(central_longitude=-42.0, central_latitude=66.3,
@@ -229,35 +282,12 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
     # return time series as xarray
     return nora3_da
 
-def write_timeseries(stations_file, output_file, param, start_time, end_time):
-    """WiP: Get stations (w/locations), do time series extraction from ERA5/NORA3, and write results to netCDF file."""
+def init_netcdf_output_file(out_da, station_ids, station_lons, station_lats):
+    """Initiate netCDF file with observation stations and time as unlimited dimension."""
 
-    # write msl timeseries for the complete ERA5 period for
-    # every observation in obs data file (see line below)
-    stations = xr.open_mfdataset(stations_file)
-
-    station_ids = stations["stationid"]
-    station_lons = stations["longitude"]
-    station_lats = stations["latitude"]
-
-    out_da = xr.Dataset()
-    out_da["stationid"] = station_ids
+    out_da["stationid"] = station_ids.astype(str)
     out_da["longitude_station"] = station_lons
     out_da["latitude_station"] = station_lats
-
-    dataarrays = []
-    for (station_id, station_lon, station_lat) in zip(station_ids, station_lons, station_lats):
-        print("Writing timeseries for station " + str(station_id.values) + " at " 
-                + str(station_lon.values) + ", " + str(station_lat.values))
-
-        da = get_era5_timeseries(param, station_lon, station_lat, 
-                start_time, end_time)
-        
-        dataarrays.append(da)
-    
-    combined = xr.concat(dataarrays, dim="station")
-
-    out_da[param] = combined
 
     # ensure CF compliance
     out_da.attrs["Conventions"] = "CF-1.8"
@@ -275,17 +305,61 @@ def write_timeseries(stations_file, output_file, param, start_time, end_time):
     out_da["latitude_station"].attrs["units"] = "degrees_north"
     out_da["latitude_station"].attrs["long_name"] = "latitude_station"
 
-    print(out_da)
-    out_da.to_netcdf(output_file, 
-                        format="NETCDF4", engine="netcdf4", unlimited_dims="time",
-                        encoding={param: {"dtype": "float32", "zlib": False, "_FillValue": 1.0e37}})
+def write_timeseries(stations_file, output_file, param, start_time, end_time):
+    """WiP: Get stations (w/locations), do time series extraction from ERA5/NORA3, and write results to netCDF file."""
+    # write msl timeseries for the complete ERA5 period for
+    # every observation in obs data file (see line below)
+    stations = xr.open_mfdataset(stations_file)
+
+    station_ids = stations["stationid"]
+    station_lons = stations["longitude"]
+    station_lats = stations["latitude"]
+
+    print("From " + start_time.strftime("%Y%m%d-%H%M"))
+    print("To " + end_time.strftime("%Y%m%d-%H%M"))
+
+    stride_start_time = start_time - timedelta(hours=1)
+    stride_end_time = start_time - timedelta(hours=1)
+    # stride in time
+    while stride_end_time is not end_time:
+        stride_start_time = stride_end_time + timedelta(hours=1)
+        stride_end_time = stride_start_time + timedelta(days=365) - timedelta(hours=1)
+        if stride_end_time > end_time:
+            stride_end_time = end_time
+
+        print("From " + stride_start_time.strftime("%Y%m%d-%H%M"))
+        print("To " + stride_end_time.strftime("%Y%m%d-%H%M"))
+
+        dataarrays = []
+
+        for (station_id, station_lon, station_lat) in zip(station_ids, station_lons, station_lats):
+            print("Writing timeseries for station " + str(station_id.values) + " at " 
+                    + str(station_lon.values) + ", " + str(station_lat.values))
+
+            da = get_era5_timeseries(param, station_lon, station_lat, 
+                    stride_start_time, stride_end_time)
+            
+            dataarrays.append(da)
+
+        combined = xr.concat(dataarrays, dim="station")
+        out_da = xr.Dataset()
+        out_da[param] = combined
+        
+        out_da = out_da.chunk(chunks={"station": 1})
+        print(out_da)
+
+        if not os.path.isfile(output_file):
+            init_netcdf_output_file(out_da, station_ids, station_lons, station_lats)
+            out_da.to_netcdf(output_file, 
+                                format="NETCDF4", engine="netcdf4", unlimited_dims="time", mode="w",
+                                encoding={param: {"dtype": "float32", "zlib": False, "_FillValue": 1.0e37}})
+        else:
+            append_to_netcdf(output_file, out_da, unlimited_dims="time")
 
 if __name__ == "__main__":
-    # TODO: fix memory prob with to_netcdf(),
+    # TODO: fix memory prob with to_netcdf() in order to write long timeseries w/o appending,
     #       find nearest "wet point" and describe difference in latlon for these stations, 
-    #       (see https://gitlab.met.no/jeanr/interact_with_roms/-/tree/master/lat_lon_to_ROMS_timeseries)
-    #       extract functions (choose time stride, parameter, input and output filenames),
-    #       produce full ERA5 timeseries for all params on PPI
+    #       extract functions (choose time stride, parameter, input and output filenames)
 
     # parse optional arguments
     parser = argparse.ArgumentParser(description="Extract timeseries from NORA3/ERA5 \
@@ -313,9 +387,9 @@ if __name__ == "__main__":
 
     input_stations = "/lustre/storeB/project/IT/geout/machine-ocean/prepared_datasets/storm_surge/aggregated_water_level_data/aggregated_water_level_observations_with_pytide_prediction_dataset.nc4"
     output_file = "aggregated_era5_data_incomplete_test.nc"
-    param = "msl"
-    start_time = datetime(1979, 1, 1, 18)
-    end_time = datetime(1979, 1, 1, 19) #datetime(2019, 12, 31))
+    param = "swh"
+    start_time = datetime(1979, 1, 1, 0)
+    end_time = datetime(2019, 12, 31, 23) #datetime(2019, 12, 31))
     write_timeseries(input_stations, output_file, param, start_time, end_time)
 
 # %%
