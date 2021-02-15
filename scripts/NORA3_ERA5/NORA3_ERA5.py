@@ -285,12 +285,7 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
 def init_netcdf_output_file(out_da, station_ids, station_lons, station_lats):
     """Initiate netCDF file with observation stations and time as unlimited dimension."""
 
-<<<<<<< HEAD
     out_da["stationid"] = station_ids.astype(str)
-=======
-    out_da = xr.Dataset()
-    out_da["stationid"] = station_ids.astype('|S')
->>>>>>> 156dcb74724751c98cd9fbb8d075f01919c8a264
     out_da["longitude_station"] = station_lons
     out_da["latitude_station"] = station_lats
 
@@ -362,14 +357,9 @@ def write_timeseries(stations_file, output_file, param, start_time, end_time):
             append_to_netcdf(output_file, out_da, unlimited_dims="time")
 
 if __name__ == "__main__":
-<<<<<<< HEAD
     # TODO: fix memory prob with to_netcdf() in order to write long timeseries w/o appending,
     #       find nearest "wet point" and describe difference in latlon for these stations, 
     #       extract functions (choose time stride, parameter, input and output filenames)
-=======
-    # TODO: - find nearest "wet point" and describe difference in latlon for these stations, 
-    #       (see https://gitlab.met.no/jeanr/interact_with_roms/-/tree/master/lat_lon_to_ROMS_timeseries)
->>>>>>> 156dcb74724751c98cd9fbb8d075f01919c8a264
 
     # parse optional arguments
     #parser = argparse.ArgumentParser(description="Extract timeseries from NORA3/ERA5 \
