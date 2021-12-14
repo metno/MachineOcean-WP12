@@ -1,6 +1,9 @@
 """NORA3 and ERA5 tools. 
 
 Install requirements with pip3 install -r requirements.txt
+
+NOTE: expver is not treated, and files containing the expver dimension cannot be used
+(see https://confluence.ecmwf.int/pages/viewpage.action?pageId=173385064 for details about expver)
 """
 
 #%%
@@ -10,6 +13,8 @@ import os
 import argparse
 import xarray as xr
 import cartopy.crs as ccrs
+import dask
+import gc
 from datetime import datetime
 from datetime import timedelta
 from dateutil.relativedelta import relativedelta
@@ -28,7 +33,9 @@ def _expand_variable(nc_variable, data, expanding_dim, nc_shape, added_size):
             'units': nc_variable.units,
             'calendar': nc_variable.calendar,
         }
+
     data_encoded = xr.conventions.encode_cf_variable(data) # , name=name)
+    
     left_slices = data.dims.index(expanding_dim)
     right_slices = data.ndim - left_slices - 1
     nc_slice   = (slice(None),) * left_slices + (slice(nc_shape, nc_shape + added_size),) + (slice(None),) * (right_slices)
@@ -46,7 +53,7 @@ def append_to_netcdf(filename, ds_to_append, unlimited_dims):
         # TODO: change this so it can support multiple expanding dims
         raise ValueError(
             "We only support one unlimited dim for now, "
-            f"got {len(unlimited_dims)}.")
+            "got {}.".format(len(unlimited_dims)))
 
     unlimited_dims = list(set(unlimited_dims))
     expanding_dim = unlimited_dims[0]
@@ -204,7 +211,24 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
     /lustre/storeB/project/fou/om/WINDSURFER/HM40h12/netcdf [1997-08, 2019-12]
     """
     data_dir = "/lustre/storeB/project/fou/om/WINDSURFER/HM40h12/netcdf"
-    available_atm_params = ["air_pressure_at_sea_level", "x_wind_10m", "y_wind_10m"]
+    available_atm_params = ["air_pressure_at_sea_level", "x_wind_10m", "y_wind_10m", 
+        "integral_of_toa_net_downward_shortwave_flux_wrt_time", 
+        "integral_of_surface_net_downward_shortwave_flux_wrt_time",
+        "integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time",
+        "snowfall_amount_acc", 
+        "precipitation_amount_acc",
+        "air_temperature_2m",
+        "relative_humidity_2m",
+        "cloud_area_fraction",
+        "convective_cloud_area_fraction",
+        "high_type_cloud_area_fraction",
+        "medium_type_cloud_area_fraction",
+        "low_type_cloud_area_fraction"]
+    integrated_params = ["integral_of_toa_net_downward_shortwave_flux_wrt_time", 
+        "integral_of_surface_net_downward_shortwave_flux_wrt_time",
+        "integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time",
+        "snowfall_amount_acc", 
+        "precipitation_amount_acc"]
 
     # sanity check arguments
     if param not in available_atm_params:
@@ -219,8 +243,34 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
 
     # find and open correct netCDF file(s)
     filenames = []
+    spinup_filenames = []
     hour = timedelta(hours=1)
     current_time = start_time
+
+    # get the time step before start_time needed for compute the intantanous value for start_time
+    if param in integrated_params:
+        current_time_with_offset = current_time - hour - timedelta(hours=4)
+            
+        # find correct period folder
+        if current_time_with_offset.hour < 6:
+            period = 0
+        elif current_time_with_offset.hour < 12:
+            period = 6
+        elif current_time_with_offset.hour < 18:
+            period = 12
+        else:
+            period = 18
+        
+        # find correct index file
+        index_file = current_time.hour - 1 - period
+        if index_file < 0:
+            index_file += 24
+            
+        first_timestep_filename = os.path.join(data_dir, "{year}/{month}/{day}/{period:02d}/fc{year}{month}{day}{period:02d}_00{index_file}_fp.nc" \
+            .format(year=current_time_with_offset.strftime("%Y"), 
+                    month=current_time_with_offset.strftime("%m"), 
+                    day=current_time_with_offset.strftime("%d"), 
+                    period=period, index_file=index_file))
 
     if param in available_atm_params:
         while current_time <= end_time:
@@ -247,45 +297,224 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
                         month=current_time_with_offset.strftime("%m"), 
                         day=current_time_with_offset.strftime("%d"), 
                         period=period, index_file=index_file)))
+            
+            # build list of spinup filenames – the spinup timestep will only be used to get the 
+            # intantanous value for the next timestep
+            if param in integrated_params and index_file == 4:
+                spinup_filenames.append(
+                    os.path.join(data_dir, "{year}/{month}/{day}/{period:02d}/fc{year}{month}{day}{period:02d}_00{index_file}_fp.nc" \
+                    .format(year=current_time_with_offset.strftime("%Y"), 
+                            month=current_time_with_offset.strftime("%m"), 
+                            day=current_time_with_offset.strftime("%d"), 
+                            period=period, index_file=3)))
+
             current_time += hour
     else:
         raise RuntimeError(param + " is not found in NORA3 data set")
     
-    nora3 = xr.open_mfdataset(filenames)
+    print(filenames)
 
-    # find coordinates in data set projection by transformation:
-    #data_crs = ccrs.LambertConformal(central_longitude=-42.0, central_latitude=66.3,
-    #            standard_parallels=[66.3, 66.3], 
-    #            globe=ccrs.Globe(datum="WGS84",
-    #            semimajor_axis=6371000.0))
-    #x, y = data_crs.transform_point(lon, lat, src_crs=ccrs.PlateCarree())
+    with dask.config.set(**{'array.slicing.split_large_chunks': True}):
+        nora3 = xr.open_mfdataset(filenames)
 
-    #nora3_da_lon = nora3["longitude"].sel(x=x, y=y, method="nearest")
-    #nora3_da_lat = nora3["latitude"].sel(x=x, y=y, method="nearest")
-    #print("Projected lon, lat: " + str(nora3_da_lon.values) + ", " + str(nora3_da_lat.values))
-    
-    # find coordinates in data set projection by lookup in lon-lat variables
-    abslat = np.abs(nora3.latitude-lat)
-    abslon = np.abs(nora3.longitude-lon)
-    cor = np.maximum(abslon, abslat)
-    ([y_idx], [x_idx]) = np.where(cor == np.min(cor))
+        # find coordinates in data set projection by transformation:
+        #data_crs = ccrs.LambertConformal(central_longitude=-42.0, central_latitude=66.3,
+        #            standard_parallels=[66.3, 66.3], 
+        #            globe=ccrs.Globe(datum="WGS84",
+        #            semimajor_axis=6371000.0))
+        #x, y = data_crs.transform_point(lon, lat, src_crs=ccrs.PlateCarree())
 
-    #print("Projected lon, lat: " 
-    #        + str(nora3["longitude"].isel(x=x_idx, y=y_idx).values) + ", " 
-    #        + str(nora3["latitude"].isel(x=x_idx, y=y_idx).values))
+        #nora3_da_lon = nora3["longitude"].sel(x=x, y=y, method="nearest")
+        #nora3_da_lat = nora3["latitude"].sel(x=x, y=y, method="nearest")
+        #print("Projected lon, lat: " + str(nora3_da_lon.values) + ", " + str(nora3_da_lat.values))
+        
+        # find coordinates in data set projection by lookup in lon-lat variables
+        abslat = np.abs(nora3.latitude-lat)
+        abslon = np.abs(nora3.longitude-lon)
+        cor = np.maximum(abslon, abslat)
+        ([y_idx], [x_idx]) = np.where(cor == np.min(cor))
 
-    # extract data set
-    #nora3_da = nora3[param].sel(x=x, y=y, method="nearest")
-    nora3_da = nora3[param].isel(x=x_idx, y=y_idx)
-    nora3_da = nora3_da.sel(time=slice(start_time, end_time))
+        #print("Projected lon, lat: " 
+        #        + str(nora3["longitude"].isel(x=x_idx, y=y_idx).values) + ", " 
+        #        + str(nora3["latitude"].isel(x=x_idx, y=y_idx).values))
 
-    # return time series as xarray
+        # extract data set
+        #nora3_da = nora3[param].sel(x=x, y=y, method="nearest")
+        nora3_da = nora3[param].isel(x=x_idx, y=y_idx)
+        nora3_da = nora3_da.sel(time=slice(start_time, end_time))
+
+        del nora3_da["x"]
+        del nora3_da["y"]
+        del nora3_da.attrs["grid_mapping"]
+
+        if param in integrated_params:
+            nora3_da_original = nora3_da.copy(deep=True)
+
+            nora3_first_timestep = xr.open_dataset(first_timestep_filename)
+            nora3_da_first_timestep = nora3_first_timestep[param].isel(x=x_idx, y=y_idx)
+            nora3_da_first_timestep = nora3_da_first_timestep.sel(time=slice(start_time-hour))
+
+            nora3_spinup = xr.open_mfdataset(spinup_filenames)
+            nora3_da_spinup = nora3_spinup[param].isel(x=x_idx, y=y_idx)
+            nora3_da_spinup = nora3_da_spinup.sel(time=slice(start_time, end_time-hour))
+
+            # load data - this will not work particularly well for long time series...
+            # XXX: should figure out a better solution - upgrade dask
+            nora3_da.load()
+            nora3_da_original.load()
+
+            # compute instantanous values for all first timesteps after spinup (04, 10, 16, and 22)
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 4])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 4).values \
+                                                                    -nora3_da_spinup.sel(time=nora3_da_spinup.time.dt.hour == 3).values
+            
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 10])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 10).values \
+                                                                    -nora3_da_spinup.sel(time=nora3_da_spinup.time.dt.hour == 9).values
+            
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 16])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 16).values \
+                                                                    -nora3_da_spinup.sel(time=nora3_da_spinup.time.dt.hour == 15).values
+                                                                    
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 22])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 22).values \
+                                                                    -nora3_da_spinup.sel(time=nora3_da_spinup.time.dt.hour == 21).values
+
+            # compute instantanous values for all remaining timesteps - CONT HERE
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 0])] = 0#nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 0).values[1:] \
+                                                                    #-nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 23).values[:-1]
+
+            #print(nora3_da.sel(time=nora3_da.time.dt.hour == 0))
+            #print(nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 0))
+            #print(nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 23))
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 1])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 1).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 0).values
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 2])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 2).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 1).values
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 3])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 3).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 2).values
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 5])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 5).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 4).values
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 6])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 6).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 5).values
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 7])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 7).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 6).values
+                                                                    
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 8])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 8).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 7).values
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 9])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 9).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 8).values
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 11])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 11).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 10).values
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 12])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 12).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 11).values
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 13])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 13).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 12).values
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 14])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 14).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 13).values
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 15])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 15).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 14).values
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 17])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 17).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 16).values
+                                                                    
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 18])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 18).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 17).values
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 19])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 19).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 18).values
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 20])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 20).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 19).values
+
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 21])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 21).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 20).values
+                                                                    
+            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 23])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 23).values \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 22).values
+
+            # compute first instantanous values
+            nora3_da.values[0] = nora3_da_original.values[0] - nora3_da_first_timestep.values[0]
+
     return nora3_da
+
+def write_SUNPOINT_timeseries(stations, output_file, param, start_time, end_time):
+    station_ids = stations["stationid"]
+    station_lons = stations["longitude"]
+    station_lats = stations["latitude"]
+
+    print("From " + start_time.strftime("%Y%m%d-%H%M"))
+    print("To " + end_time.strftime("%Y%m%d-%H%M"))
+
+    stride_start_time = start_time - timedelta(hours=1)
+    stride_end_time = start_time - timedelta(hours=1)
+    # stride in time
+    while stride_end_time is not end_time:
+        stride_start_time = stride_end_time + timedelta(hours=1)
+        stride_end_time = stride_start_time + timedelta(days=10) - timedelta(hours=1)
+        if stride_end_time > end_time:
+            stride_end_time = end_time
+
+        print("From " + stride_start_time.strftime("%Y%m%d-%H%M"))
+        print("To " + stride_end_time.strftime("%Y%m%d-%H%M"))
+
+        dataarrays = []
+
+        for (station_id, station_lon, station_lat) in zip(station_ids, station_lons, station_lats):
+            print("Writing timeseries for station " + str(station_id) + " at " 
+                    + str(station_lon) + ", " + str(station_lat))
+
+            da = get_nora3_timeseries(param, station_lon, station_lat, 
+                    stride_start_time, stride_end_time)
+            
+            dataarrays.append(da)
+
+        combined = xr.concat(dataarrays, dim="station")
+        out_da = xr.Dataset()
+        out_da[param] = combined
+        
+        out_da = out_da.chunk(chunks={"station": 1})
+
+        if not os.path.isfile(output_file):
+            init_netcdf_output_file(out_da, station_ids, station_lons, station_lats)
+
+            # We are not getting these variables from an existing nc-file, and therefore need to 
+            # ensure that the correct dimension (station) is used
+            out_da["stationid"] = out_da["stationid"].swap_dims({"stationid": "station"})
+            out_da["longitude"] = out_da["longitude"].expand_dims(dim="station")
+            out_da["longitude_station"] = out_da["longitude_station"].swap_dims({"longitude_station": "station"})
+            out_da["latitude"] = out_da["latitude"].expand_dims(dim="station")
+            out_da["latitude_station"] = out_da["latitude_station"].swap_dims({"latitude_station": "station"})
+
+            out_da.to_netcdf(output_file, 
+                                format="NETCDF4", engine="netcdf4", unlimited_dims="time", mode="w",
+                                encoding={param: {"dtype": "float32", "zlib": False, "_FillValue": 1.0e37}})
+        else:
+            out_da[param].encoding['dtype'] = "float32"
+            out_da[param].encoding['zlib'] = False
+            out_da[param].encoding['_FillValue'] = 1.0e37
+
+            append_to_netcdf(output_file, out_da, unlimited_dims="time")
+
+        del out_da
+        gc.collect()
 
 def init_netcdf_output_file(out_da, station_ids, station_lons, station_lats):
     """Initiate netCDF file with observation stations and time as unlimited dimension."""
 
-    out_da["stationid"] = station_ids.astype(str)
+    if(isinstance(station_ids[0], str)):
+        out_da["stationid"] = station_ids
+    else:
+        out_da["stationid"] = station_ids.astype(str)
+
     out_da["longitude_station"] = station_lons
     out_da["latitude_station"] = station_lats
 
@@ -354,6 +583,14 @@ def write_timeseries(stations_file, output_file, param, start_time, end_time):
                                 format="NETCDF4", engine="netcdf4", unlimited_dims="time", mode="w",
                                 encoding={param: {"dtype": "float32", "zlib": False, "_FillValue": 1.0e37}})
         else:
+            out_da[param].encoding['dtype'] = "float32"
+            out_da[param].encoding['zlib'] = False
+            out_da[param].encoding['_FillValue'] = 1.0e37
+
+            del out_da[param].encoding['missing_value']
+            del out_da[param].encoding['scale_factor']
+            del out_da[param].encoding['add_offset']
+
             append_to_netcdf(output_file, out_da, unlimited_dims="time")
 
 if __name__ == "__main__":
@@ -385,12 +622,29 @@ if __name__ == "__main__":
     #end_time = datetime.strptime(args.end_time, '%Y-%m-%dT%H:%M.%f')
     #write_timeseries(args.input_stations, args.output_file, args.param, start_time, end_time)
 
-    # hardcoded example - extracting msl from start_time to end_time for all stations contained in the input_stations nedCDF file
-    input_stations = "/lustre/storeB/project/IT/geout/machine-ocean/prepared_datasets/storm_surge/aggregated_water_level_data/aggregated_water_level_observations_with_pytide_prediction_dataset.nc4"
-    output_file = "aggregated_era5_data_incomplete_test.nc"
-    param = "swh"
-    start_time = datetime(1979, 1, 1, 0)
-    end_time = datetime(2019, 12, 31, 23) #datetime(2019, 12, 31))
-    write_timeseries(input_stations, output_file, param, start_time, end_time)
+    # hardcoded example - extracting param from start_time to end_time for all stations contained in the input_stations nedCDF file
+    #input_stations = "/lustre/storeB/project/IT/geout/machine-ocean/prepared_datasets/storm_surge/aggregated_water_level_data/aggregated_water_level_observations_with_pytide_prediction_dataset.nc4"
+    #output_file = "aggregated_era5_mwd.nc"
+    #param = "mwd"
+    #start_time = datetime(2020, 1, 1, 0)
+    #end_time = datetime(2021, 4, 30, 23)
+    #write_timeseries(input_stations, output_file, param, start_time, end_time)
+
+    # hardcoded example - extracting param from start_time to end_time for all stations contained in the input_stations nedCDF file
+    #input_stations = {
+    #    "stationid": ["Blindern", "Bergen", "Tromsø-Holt"],
+    #    "longitude": [10.72, 5.332, 18.9368],
+    #    "latitude": [59.9423, 60.3837, 69.6537]
+    #}
+    input_stations = {
+        "stationid": ["Blindern"],
+        "longitude": [10.72],
+        "latitude": [59.9423]
+    }
+    output_file = "test.nc"
+    param = "integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time"
+    start_time = datetime(2020, 1, 1, 0)
+    end_time = datetime(2020, 12, 31, 23)
+    write_SUNPOINT_timeseries(input_stations, output_file, param, start_time, end_time)
 
 # %%
