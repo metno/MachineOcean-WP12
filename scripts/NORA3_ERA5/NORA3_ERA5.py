@@ -242,6 +242,7 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
     #print("To " + end_time.strftime("%Y%m%d-%H"))
 
     # find and open correct netCDF file(s)
+    first_timestep_filename = ""
     filenames = []
     spinup_filenames = []
     hour = timedelta(hours=1)
@@ -312,7 +313,17 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
     else:
         raise RuntimeError(param + " is not found in NORA3 data set")
     
-    print(filenames)
+    #print(first_timestep_filename)
+    #print(spinup_filenames)
+    #print(filenames)
+
+    # correction for not being able to read files with open_mfdataset
+    # some leap year oddity??
+    filenames = [x for x in filenames if not x.startswith("/lustre/storeB/project/fou/om/WINDSURFER/HM40h12/netcdf/2020/02/29/18/fc2020022918")]
+    spinup_filenames = [x for x in spinup_filenames if not x.startswith("/lustre/storeB/project/fou/om/WINDSURFER/HM40h12/netcdf/2020/02/29/18/fc2020022918")]
+
+    #print(spinup_filenames)
+    #print(filenames)
 
     with dask.config.set(**{'array.slicing.split_large_chunks': True}):
         nora3 = xr.open_mfdataset(filenames)
@@ -348,8 +359,6 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
         del nora3_da.attrs["grid_mapping"]
 
         if param in integrated_params:
-            nora3_da_original = nora3_da.copy(deep=True)
-
             nora3_first_timestep = xr.open_dataset(first_timestep_filename)
             nora3_da_first_timestep = nora3_first_timestep[param].isel(x=x_idx, y=y_idx)
             nora3_da_first_timestep = nora3_da_first_timestep.sel(time=slice(start_time-hour))
@@ -359,8 +368,35 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
             nora3_da_spinup = nora3_da_spinup.sel(time=slice(start_time, end_time-hour))
 
             # load data - this will not work particularly well for long time series...
-            # XXX: should figure out a better solution - upgrade dask
+            # XXX: should figure out a better solution
             nora3_da.load()
+            nora3_da_spinup.load()
+
+            # add zero-values for missing times
+            # XXX: extremely hacky workaround
+            if end_time == datetime(2020, 2, 29, 23):
+                nora3_da_new = xr.DataArray(data=np.zeros((2,1)), dims=["time", "height0"],
+                        coords={"time": [datetime(2020, 2, 29, 22), datetime(2020, 2, 29, 23)],
+                                "height0": [0.0]})
+                nora3_da = xr.concat([nora3_da, nora3_da_new], dim="time")
+                
+                nora3_da_spinup_new = xr.DataArray(data=np.zeros((1,1)), dims=["time", "height0"],
+                        coords={"time": [datetime(2020, 2, 29, 21)],
+                                "height0": [0.0]})
+                nora3_da_spinup = xr.concat([nora3_da_spinup, nora3_da_spinup_new], dim="time")
+            ###
+            if start_time == datetime(2020, 3, 1, 0) :
+                nora3_da_new = xr.DataArray(data=np.zeros((4,1)), dims=["time", "height0"],
+                        coords={"time": [datetime(2020, 3, 1, 0), datetime(2020, 3, 1, 1), 
+                        datetime(2020, 3, 1, 2), datetime(2020, 3, 1, 3)],
+                                "height0": [0.0]})
+                nora3_da = xr.concat([nora3_da_new, nora3_da], dim="time", combine_attrs="no_conflicts")
+            ###
+
+            nora3_da_original = nora3_da.copy(deep=True) 
+
+            # load data - this will not work particularly well for long time series...
+            # XXX: should figure out a better solution
             nora3_da_original.load()
 
             # compute instantanous values for all first timesteps after spinup (04, 10, 16, and 22)
@@ -376,13 +412,10 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
             nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 22])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 22).values \
                                                                     -nora3_da_spinup.sel(time=nora3_da_spinup.time.dt.hour == 21).values
 
-            # compute instantanous values for all remaining timesteps - CONT HERE
-            nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 0])] = 0#nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 0).values[1:] \
-                                                                    #-nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 23).values[:-1]
-
-            #print(nora3_da.sel(time=nora3_da.time.dt.hour == 0))
-            #print(nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 0))
-            #print(nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 23))
+            # compute instantanous values for all remaining timesteps
+            midnight_indices = nora3_da.time[nora3_da.time.dt.hour == 0]
+            nora3_da.loc[dict(time=midnight_indices[1:])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 0).values[1:] \
+                                                                    -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 23).values[:-1]
 
             nora3_da.loc[dict(time=nora3_da.time[nora3_da.time.dt.hour == 1])] = nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 1).values \
                                                                     -nora3_da_original.sel(time=nora3_da_original.time.dt.hour == 0).values
@@ -444,7 +477,19 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
             # compute first instantanous values
             nora3_da.values[0] = nora3_da_original.values[0] - nora3_da_first_timestep.values[0]
 
+            # leap year problem with open_mfdataset
+            # XXX: extremely hacky workaround
+            if(nora3_da.values[0] < 0):
+                nora3_da.values[0] = 0.0
+
     return nora3_da
+
+import resource
+def using(point=""):
+    usage=resource.getrusage(resource.RUSAGE_SELF)
+    return '''%s: usertime=%s systime=%s mem=%s mb
+           '''%(point,usage[0],usage[1],
+                usage[2]/1024.0 )
 
 def write_SUNPOINT_timeseries(stations, output_file, param, start_time, end_time):
     station_ids = stations["stationid"]
@@ -458,6 +503,7 @@ def write_SUNPOINT_timeseries(stations, output_file, param, start_time, end_time
     stride_end_time = start_time - timedelta(hours=1)
     # stride in time
     while stride_end_time is not end_time:
+        print(using())
         stride_start_time = stride_end_time + timedelta(hours=1)
         stride_end_time = stride_start_time + timedelta(days=10) - timedelta(hours=1)
         if stride_end_time > end_time:
@@ -489,9 +535,9 @@ def write_SUNPOINT_timeseries(stations, output_file, param, start_time, end_time
             # We are not getting these variables from an existing nc-file, and therefore need to 
             # ensure that the correct dimension (station) is used
             out_da["stationid"] = out_da["stationid"].swap_dims({"stationid": "station"})
-            out_da["longitude"] = out_da["longitude"].expand_dims(dim="station")
+            #out_da["longitude"] = out_da["longitude"].expand_dims(dim="station")
             out_da["longitude_station"] = out_da["longitude_station"].swap_dims({"longitude_station": "station"})
-            out_da["latitude"] = out_da["latitude"].expand_dims(dim="station")
+            #out_da["latitude"] = out_da["latitude"].expand_dims(dim="station")
             out_da["latitude_station"] = out_da["latitude_station"].swap_dims({"latitude_station": "station"})
 
             out_da.to_netcdf(output_file, 
@@ -504,6 +550,7 @@ def write_SUNPOINT_timeseries(stations, output_file, param, start_time, end_time
 
             append_to_netcdf(output_file, out_da, unlimited_dims="time")
 
+        del combined
         del out_da
         gc.collect()
 
@@ -636,12 +683,17 @@ if __name__ == "__main__":
     #    "longitude": [10.72, 5.332, 18.9368],
     #    "latitude": [59.9423, 60.3837, 69.6537]
     #}
+    #input_stations = {
+    #    "stationid": ["Blindern", "Bergen", "Tromsø-Holt"],
+    #    "longitude": [10.72, 5.332, 18.9368],
+    #    "latitude": [59.9423, 60.3837, 69.6537]
+    #}
     input_stations = {
-        "stationid": ["Blindern"],
-        "longitude": [10.72],
-        "latitude": [59.9423]
+        "stationid": ["Bergen", "Tromsø-Holt"],
+        "longitude": [5.332, 18.9368],
+        "latitude": [60.3837, 69.6537]
     }
-    output_file = "test.nc"
+    output_file = "integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time_2020.nc"
     param = "integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time"
     start_time = datetime(2020, 1, 1, 0)
     end_time = datetime(2020, 12, 31, 23)
