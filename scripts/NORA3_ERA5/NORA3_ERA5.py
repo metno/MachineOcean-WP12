@@ -319,6 +319,7 @@ def get_nora3_timeseries(param, lon, lat, start_time, end_time):
 
     # correction for not being able to read files with open_mfdataset
     # some leap year oddity??
+    # XXX: extremely hacky workaround
     filenames = [x for x in filenames if not x.startswith("/lustre/storeB/project/fou/om/WINDSURFER/HM40h12/netcdf/2020/02/29/18/fc2020022918")]
     spinup_filenames = [x for x in spinup_filenames if not x.startswith("/lustre/storeB/project/fou/om/WINDSURFER/HM40h12/netcdf/2020/02/29/18/fc2020022918")]
 
@@ -581,7 +582,7 @@ def init_netcdf_output_file(out_da, station_ids, station_lons, station_lats):
     out_da["latitude_station"].attrs["units"] = "degrees_north"
     out_da["latitude_station"].attrs["long_name"] = "latitude_station"
 
-def write_timeseries(stations_file, output_file, param, start_time, end_time):
+def write_timeseries_MO(stations_file, output_file, param, start_time, end_time):
     """WiP: Get stations (w/locations), do time series extraction from ERA5/NORA3, and write results to netCDF file."""
     # write msl timeseries for the complete ERA5 period for
     # every observation in obs data file (see line below)
@@ -677,22 +678,13 @@ if __name__ == "__main__":
     #end_time = datetime(2021, 4, 30, 23)
     #write_timeseries(input_stations, output_file, param, start_time, end_time)
 
-    # hardcoded example - extracting param from start_time to end_time for all stations contained in the input_stations nedCDF file
-    #input_stations = {
-    #    "stationid": ["Blindern", "Bergen", "Tromsø-Holt"],
-    #    "longitude": [10.72, 5.332, 18.9368],
-    #    "latitude": [59.9423, 60.3837, 69.6537]
-    #}
-    #input_stations = {
-    #    "stationid": ["Blindern", "Bergen", "Tromsø-Holt"],
-    #    "longitude": [10.72, 5.332, 18.9368],
-    #    "latitude": [59.9423, 60.3837, 69.6537]
-    #}
+    # hardcoded example - extracting param from start_time to end_time for all stations contained in the input_stations dict
     input_stations = {
-        "stationid": ["Bergen", "Tromsø-Holt"],
-        "longitude": [5.332, 18.9368],
-        "latitude": [60.3837, 69.6537]
+        "stationid": ["Blindern", "Bergen", "Tromsø-Holt"],
+        "longitude": [10.72, 5.332, 18.9368],
+        "latitude": [59.9423, 60.3837, 69.6537]
     }
+
     output_file = "integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time_2020.nc"
     param = "integral_of_surface_downwelling_shortwave_flux_in_air_wrt_time"
     start_time = datetime(2020, 1, 1, 0)
